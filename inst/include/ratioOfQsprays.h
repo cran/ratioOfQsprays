@@ -76,6 +76,43 @@ namespace RATIOOFQSPRAYS {
       // CGAL polynomial constructor
       typename PTX::Construct_polynomial constructPolynomial;
 
+      // converts the second Qspray (denominator) to a CGAL polynomial
+      typename std::list<MonomialX> terms2;
+      Polynomial<gmpq> S2 = Q2.get();
+      for(const auto& term : S2) {
+        powers expnts =
+          QSPRAY::utils::growPowers(term.first, term.first.size(), X);
+        terms2.push_back(
+          std::make_pair(
+            CGAL::Exponent_vector(expnts.begin(), expnts.end()),
+            CGAL::Gmpq(QSPRAY::utils::q2str(term.second))
+          )
+        );
+      }
+      PolyX P2 = constructPolynomial(terms2.begin(), terms2.end());
+
+      if(Q1.isConstant()) {
+        // if the numerator is constant, we won't calculate the GCD
+        //
+        // get the leading coefficient of P2 (denominator), 
+        // in order to return a monic denominator;
+        // we reverse the variables so that the outermost variable is the first one
+        std::vector<int> permutation;
+        permutation.reserve(X);
+        for(int i = X-1; i >= 0; i--) {
+          permutation.emplace_back(i);
+        }
+        typename PTX::Permute permute;
+        CGAL::Gmpq leadingCoefficient = 
+          CGAL::innermost_leading_coefficient(
+            permute(P2, permutation.begin(), permutation.end())
+          );
+        gmpq lambda(Gmpq2str(1 / leadingCoefficient));
+        Q1.scale(lambda);
+        Q2.scale(lambda);
+        return std::pair<Qspray<gmpq>,Qspray<gmpq>>(Q1, Q2);
+      }
+
       // converts the first Qspray to a CGAL polynomial
       typename std::list<MonomialX> terms1;
       Polynomial<gmpq> S1 = Q1.get();
@@ -91,21 +128,6 @@ namespace RATIOOFQSPRAYS {
       }
       PolyX P1 = constructPolynomial(terms1.begin(), terms1.end());
 
-      // converts the second Qspray to a CGAL polynomial
-      typename std::list<MonomialX> terms2;
-      Polynomial<gmpq> S2 = Q2.get();
-      for(const auto& term : S2) {
-        powers expnts =
-          QSPRAY::utils::growPowers(term.first, term.first.size(), X);
-        terms2.push_back(
-          std::make_pair(
-            CGAL::Exponent_vector(expnts.begin(), expnts.end()),
-            CGAL::Gmpq(QSPRAY::utils::q2str(term.second))
-          )
-        );
-      }
-      PolyX P2 = constructPolynomial(terms2.begin(), terms2.end());
-
       // take the CGAL GCD up to a constant factor
       typename PTX::Gcd_up_to_constant_factor gcd_utcf;
       // (to get the 'ordinary' GCD we would use typename PTX::Gcd gcd)
@@ -115,7 +137,21 @@ namespace RATIOOFQSPRAYS {
       PolyX QA = CGAL::integral_division(P1, D);
       PolyX QB = CGAL::integral_division(P2, D);
 
-      // now make the Qspray corresponding to QA
+      // get the leading coefficient of QB (denominator), 
+      // in order to return a monic denominator;
+      // we reverse the variables so that the outermost variable is the first one
+      std::vector<int> permutation;
+      permutation.reserve(X);
+      for(int i = X-1; i >= 0; i--) {
+        permutation.emplace_back(i);
+      }
+      typename PTX::Permute permute;
+      CGAL::Gmpq leadingCoefficient = 
+        CGAL::innermost_leading_coefficient(
+          permute(QB, permutation.begin(), permutation.end())
+        );
+
+      // now make the Qspray corresponding to QA (numerator)
       std::list<MonomialX> monomialsA;
       typename PTX::Monomial_representation mrepr;
       mrepr(QA, std::back_inserter(monomialsA));
@@ -125,11 +161,11 @@ namespace RATIOOFQSPRAYS {
         CGAL::Exponent_vector exponents = (*itmons).first;
         powers expnts(exponents.begin(), exponents.end());
         QSPRAY::utils::simplifyPowers(expnts);
-        gmpq coeff(Gmpq2str((*itmons).second));
+        gmpq coeff(Gmpq2str((*itmons).second / leadingCoefficient));
         SA[expnts] = coeff;
       }
 
-      // now make the Qspray corresponding to QB
+      // now make the Qspray corresponding to QB (denominator)
       std::list<MonomialX> monomialsB;
       mrepr(QB, std::back_inserter(monomialsB));
       Polynomial<gmpq> SB;
@@ -137,7 +173,7 @@ namespace RATIOOFQSPRAYS {
         CGAL::Exponent_vector exponents = (*itmons).first;
         powers expnts(exponents.begin(), exponents.end());
         QSPRAY::utils::simplifyPowers(expnts);
-        gmpq coeff(Gmpq2str((*itmons).second));
+        gmpq coeff(Gmpq2str((*itmons).second / leadingCoefficient));
         SB[expnts] = coeff;
       }
       
@@ -204,11 +240,6 @@ namespace RATIOOFQSPRAYS {
 
     template<typename T>
     static inline void simplifyFraction(Qspray<T>& A, Qspray<T>& B) {
-      if(!A.isConstant() && !B.isConstant()) {
-        std::pair<Qspray<T>,Qspray<T>> QAQB = callGetQuotients(A, B);
-        A = QAQB.first;  // is clean
-        B = QAQB.second; // is clean
-      }
       if(B.isConstant()) {
         T b = B.constantTerm();
         if(b == T(0)) {
@@ -217,6 +248,10 @@ namespace RATIOOFQSPRAYS {
         T lambda = T(1) / b;
         A.scale(lambda);
         B.scale(lambda);
+      } else {
+        std::pair<Qspray<T>,Qspray<T>> QAQB = callGetQuotients(A, B);
+        A = QAQB.first;  // is clean
+        B = QAQB.second; // is clean
       }
     }
 
